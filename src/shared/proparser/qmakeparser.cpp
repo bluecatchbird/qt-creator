@@ -531,6 +531,45 @@ void QMakeParser::function_flushLine(ushort &quote,QStack<ParseCtx> &xprStack,Co
         warnOperator("at end of line");
     }
 }
+
+void QMakeParser::function_line_continuations(const ushort* &end, bool &lineCont) {
+    // Then look for line continuations. Yep - no escaping here as well.
+    forever {
+        // We don't have to check for underrun here, as we already determined
+        // that the line is non-empty.
+        ushort ec = *(end - 1);
+        if (ec == '\\') {
+            --end;
+            lineCont = true;
+            break;
+        }
+        if (ec != ' ' && ec != '\t' && ec != '\r') {
+            lineCont = false;
+            break;
+        }
+        --end;
+    }
+}
+
+bool QMakeParser::function_skip_leading_whitespace(int &indent, const ushort* &cur,
+                                                   const ushort* &inend, ushort &c) {
+    // First, skip leading whitespace
+    for (indent = 0; ; ++cur, ++indent) {
+        if (cur == inend) {
+            cur = 0;
+            return true;
+        }
+        c = *cur;
+        if (c == '\n') {
+            ++cur;
+            return true;
+        }
+        if (c != ' ' && c != '\t' && c != '\r')
+            break;
+    }
+    return false;
+}
+
 /* pro:
     m_directoryName
     m_fileName
@@ -638,6 +677,11 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
     forever {
         ushort c;
 
+#if 1
+        if( function_skip_leading_whitespace(indent, cur, inend, c) ) {
+            goto flushLine;
+        }
+#else
         // First, skip leading whitespace
         for (indent = 0; ; ++cur, ++indent) {
             if (cur == inend) {
@@ -652,27 +696,13 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
             if (c != ' ' && c != '\t' && c != '\r')
                 break;
         }
-
+#endif
         if( function_stripComments(cur, cptr, c, inend, end)) {
             goto ignore;
         }
 
-        // Then look for line continuations. Yep - no escaping here as well.
-        forever {
-            // We don't have to check for underrun here, as we already determined
-            // that the line is non-empty.
-            ushort ec = *(end - 1);
-            if (ec == '\\') {
-                --end;
-                lineCont = true;
-                break;
-            }
-            if (ec != ' ' && ec != '\t' && ec != '\r') {
-                lineCont = false;
-                break;
-            }
-            --end;
-        }
+
+        function_line_continuations(end, lineCont);
 
             // Finally, do the tokenization
             ushort tok, rtok;
