@@ -204,8 +204,9 @@ private:
     bool function_stripComments(const ushort *&cur, const ushort *&cptr, ushort &c, const ushort *&inend, const ushort *&end);
     void function_line_continuations(const ushort *&end, bool &lineCont);
     bool function_skip_leading_whitespace(int &indent, const ushort *&cur, const ushort *&inend, ushort &c);
-    void function_stuff(ushort *&ptr, ushort *&xprPtr, ushort &quote, ushort &needSep, ushort &tok, QString &tokBuff, int &wordCount, int &tlen, ushort *&tokPtr, ushort &rtok, ushort *&buf, QString &xprBuff, const QStringRef &in, const ushort *&cur, bool &lineMarked, ushort &term, ushort &c, Context &context, const ushort *&end);
     void function_funcCall(QStack<ParseCtx> &xprStack, int &parens, ushort &quote, ushort &term, Context &context, int &argc, int &wordCount);
+    void function_ignore(const ushort *&cur, const ushort *&cptr);
+    void function_stuff(ushort *&ptr, ushort *&xprPtr, ushort &quote, ushort &needSep, ushort &tok, QString &tokBuff, int &wordCount, int &tlen, ushort *&tokPtr, ushort &rtok, ushort *&buf, QString &xprBuff, const QStringRef &in, const ushort *&cur, bool &lineMarked, ushort &term, ushort &c, Context &context, const ushort *&end);
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(QMakeParser::ParseFlags)

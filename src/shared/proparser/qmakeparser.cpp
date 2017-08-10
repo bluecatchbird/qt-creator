@@ -575,7 +575,7 @@ void QMakeParser::function_stuff(ushort* &ptr, ushort* &xprPtr, ushort &quote,
                                  int &wordCount, int &tlen, ushort* &tokPtr,
                                  ushort &rtok, ushort* &buf, QString &xprBuff,
                                  const QStringRef &in, const ushort* &cur,
-                                 bool &lineMarked, ushort &term, ushort &c,
+                                 bool &lineMarked, ushort &term,ushort &c,
                                  Context &context, const ushort* &end) {
     cur++;
     function_flush_literal(context, ptr, tlen,
@@ -627,6 +627,11 @@ void QMakeParser::function_stuff(ushort* &ptr, ushort* &xprPtr, ushort &quote,
                     rtok, buf, xprBuff,
                     in, cur);
 
+}
+
+void QMakeParser::function_ignore(const ushort* &cur, const ushort* &cptr) {
+    cur = cptr;
+    ++m_lineNo;
 }
 
 void QMakeParser::function_funcCall(QStack<ParseCtx> &xprStack, int &parens, ushort &quote,
@@ -764,7 +769,8 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
             }
 
             if( function_stripComments(cur, cptr, c, inend, end)) {
-                goto ignore;
+                function_ignore(cur, cptr);
+                continue;
             }
 
 
@@ -993,10 +999,8 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                     lastIndent = indent;
                     lineMarked = false;
 
-                    ignore:
-                      cur = cptr;
-                      ++m_lineNo;
-
+                    function_ignore(cur, cptr);
+                    continue;
                 } else {
                     cur = cptr;
                   flushLine:
