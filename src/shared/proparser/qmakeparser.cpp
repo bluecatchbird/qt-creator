@@ -634,6 +634,17 @@ void QMakeParser::function_ignore(const ushort* &cur, const ushort* &cptr) {
     ++m_lineNo;
 }
 
+bool QMakeParser::function_newWord(const ushort* &cur, const ushort* &end, ushort &c) {
+    do {
+        if (cur == end) {
+            return true;
+        }
+        c = *cur++;
+    } while (c == ' ' || c == '\t');
+
+    return false;
+}
+
 void QMakeParser::function_funcCall(QStack<ParseCtx> &xprStack, int &parens, ushort &quote,
                                     ushort &term, Context &context, int &argc,
                                     int &wordCount) {
@@ -784,12 +795,10 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                     // Finally, do the tokenization
                     ushort tok, rtok;
 
-                  newWord:
-                    do {
-                        if (cur == end)
-                            goto lineEnd;
-                        c = *cur++;
-                    } while (c == ' ' || c == '\t');
+                  if(function_newWord(cur, end, c)) {
+                      goto lineEnd;
+                  }
+
                     while(1) {
                         if (c == '$') {
                             if (*cur == '$') { // may be EOF, EOL, WS, '#' or '\\' if past end
@@ -812,7 +821,12 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     ptr += (context == CtxTest) ? 4 : 2;
                                     xprPtr = ptr;
                                     needSep = TokNewStr;
-                                    goto newWord;
+
+                                    if(function_newWord(cur, end, c)) {
+                                        goto lineEnd;
+                                    } else {
+                                        continue;
+                                    }
                                 }
                                 if (term) {
                                   checkTerm:
@@ -986,9 +1000,11 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                         }
                         *ptr++ = c;
                       nextChr:
-                        if (cur == end)
+                        if (cur == end) {
                             goto lineEnd;
-                        c = *cur++;
+                        } else {
+                            c = *cur++;
+                        }
                     }
 
                   lineEnd:
