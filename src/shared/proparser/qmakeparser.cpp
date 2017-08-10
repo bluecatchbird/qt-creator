@@ -570,6 +570,85 @@ bool QMakeParser::function_skip_leading_whitespace(int &indent, const ushort* &c
     return false;
 }
 
+void QMakeParser::function_stuff(ushort* &ptr, ushort* &xprPtr, ushort &quote,
+                                 ushort &needSep, ushort& tok, QString &tokBuff,
+                                 int &wordCount, int &tlen, ushort* &tokPtr,
+                                 ushort &rtok, ushort* &buf, QString &xprBuff,
+                                 const QStringRef &in, const ushort* &cur,
+                                 bool &lineMarked, ushort &term, ushort &c,
+                                 Context &context, const ushort* &end) {
+    cur++;
+    function_flush_literal(context, ptr, tlen,
+                           xprPtr, needSep, wordCount);
+    if (!lineMarked) {
+        lineMarked = true;
+        *ptr++ = TokLine;
+        *ptr++ = (ushort)m_lineNo;
+    }
+    term = 0;
+    tok = TokVariable;
+    c = *cur;
+    if (c == '[') {
+        ptr += 4;
+        tok = TokProperty;
+        term = ']';
+        c = *++cur;
+    } else if (c == '{') {
+        ptr += 4;
+        term = '}';
+        c = *++cur;
+    } else if (c == '(') {
+        ptr += 2;
+        tok = TokEnvVar;
+        term = ')';
+        c = *++cur;
+    } else {
+        ptr += 4;
+    }
+    xprPtr = ptr;
+    rtok = tok;
+    bool checkForFunctionName = true;
+    while ((c & 0xFF00) || c == '.' || c == '_' ||
+           (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
+           (c >= '0' && c <= '9') || (c == '/' && term)) {
+        *ptr++ = c;
+        if (++cur == end) {
+            c = 0;
+            checkForFunctionName = false;
+        }
+        c = *cur;
+    }
+    if (checkForFunctionName && tok == TokVariable && c == '(')
+        tok = TokFuncName;
+
+    function_nofunc(ptr, xprPtr, quote,
+                    needSep, tok, tokBuff,
+                    wordCount, tlen, tokPtr,
+                    rtok, buf, xprBuff,
+                    in, cur);
+
+}
+
+void QMakeParser::function_funcCall(QStack<ParseCtx> &xprStack, int &parens, ushort &quote,
+                                    ushort &term, Context &context, int &argc,
+                                    int &wordCount) {
+    {
+        xprStack.resize(xprStack.size() + 1);
+        ParseCtx &top = xprStack.top();
+        top.parens = parens;
+        top.quote = quote;
+        top.terminator = term;
+        top.context = context;
+        top.argc = argc;
+        top.wordCount = wordCount;
+    }
+    parens = 0;
+    quote = 0;
+    term = 0;
+    argc = 1;
+    context = CtxArgs;
+}
+
 /* pro:
     m_directoryName
     m_fileName
@@ -650,7 +729,6 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
     ushort needSep = TokNewStr; // Met unquoted whitespace
     ushort quote = 0;
     ushort term = 0;
-    bool checkForFunctionName;
 
     Context context;
     ushort *ptr;
@@ -701,73 +779,19 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
             forever {
                 if (c == '$') {
                     if (*cur == '$') { // may be EOF, EOL, WS, '#' or '\\' if past end
-                        cur++;
-                        FLUSH_LITERAL();
-                        if (!lineMarked) {
-                            lineMarked = true;
-                            *ptr++ = TokLine;
-                            *ptr++ = (ushort)m_lineNo;
-                        }
-                        term = 0;
-                        tok = TokVariable;
-                        c = *cur;
-                        if (c == '[') {
-                            ptr += 4;
-                            tok = TokProperty;
-                            term = ']';
-                            c = *++cur;
-                        } else if (c == '{') {
-                            ptr += 4;
-                            term = '}';
-                            c = *++cur;
-                        } else if (c == '(') {
-                            ptr += 2;
-                            tok = TokEnvVar;
-                            term = ')';
-                            c = *++cur;
-                        } else {
-                            ptr += 4;
-                        }
-                        xprPtr = ptr;
-                        rtok = tok;
-                        checkForFunctionName = true;
-                        while ((c & 0xFF00) || c == '.' || c == '_' ||
-                               (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
-                               (c >= '0' && c <= '9') || (c == '/' && term)) {
-                            *ptr++ = c;
-                            if (++cur == end) {
-                                c = 0;
-                                checkForFunctionName = false;
-                            }
-                            c = *cur;
-                        }
-                        if (checkForFunctionName && tok == TokVariable && c == '(')
-                            tok = TokFuncName;
 
-                        function_nofunc(ptr, xprPtr, quote,
-                                        needSep, tok, tokBuff,
-                                        wordCount, tlen, tokPtr,
-                                        rtok, buf, xprBuff,
-                                        in, cur);
+                        function_stuff(ptr, xprPtr, quote,
+                                       needSep, tok, tokBuff,
+                                       wordCount, tlen, tokPtr,
+                                       rtok, buf, xprBuff,
+                                       in, cur, lineMarked, term,
+                                       c, context, end);
 
                         if ((tok & TokMask) == TokFuncName) {
                             cur++;
                           funcCall:
-                            {
-                                xprStack.resize(xprStack.size() + 1);
-                                ParseCtx &top = xprStack.top();
-                                top.parens = parens;
-                                top.quote = quote;
-                                top.terminator = term;
-                                top.context = context;
-                                top.argc = argc;
-                                top.wordCount = wordCount;
-                            }
-                            parens = 0;
-                            quote = 0;
-                            term = 0;
-                            argc = 1;
-                            context = CtxArgs;
+                            function_funcCall(xprStack, parens, quote, term,
+                                              context, argc, wordCount);
                           nextToken:
                             wordCount = 0;
                           nextWord:
