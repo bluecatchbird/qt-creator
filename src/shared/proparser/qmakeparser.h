@@ -208,6 +208,8 @@ private:
     void function_ignore(const ushort *&cur, const ushort *&cptr);
     void function_stuff(ushort *&ptr, ushort *&xprPtr, ushort &quote, ushort &needSep, ushort &tok, QString &tokBuff, int &wordCount, int &tlen, ushort *&tokPtr, ushort &rtok, ushort *&buf, QString &xprBuff, const QStringRef &in, const ushort *&cur, bool &lineMarked, ushort &term, ushort &c, Context &context, const ushort *&end);
     bool function_newWord(const ushort *&cur, const ushort *&end, ushort &c);
+    void function_checkTerm(ushort &c, ushort &term, const ushort *&cur);
+    void function_joinToken(ushort *&ptr, Context &context, ushort *&xprPtr, ushort &needSep);
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(QMakeParser::ParseFlags)

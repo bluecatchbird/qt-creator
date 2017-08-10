@@ -399,6 +399,25 @@ void QMakeParser::function_closeScope(ushort* &tokPtr) {
     }
 }
 
+void QMakeParser::function_checkTerm(ushort &c,ushort &term, const ushort* &cur) {
+    if (c != term) {
+        parseError(fL1S("Missing %1 terminator [found %2]")
+            .arg(QChar(term))
+            .arg(c ? QString(c) : QString::fromLatin1("end-of-line")));
+        m_inError = true;
+        // Just parse on, as if there was a terminator ...
+    } else {
+        cur++;
+    }
+}
+
+void QMakeParser::function_joinToken(ushort* &ptr, Context &context, ushort* &xprPtr,
+                                     ushort &needSep) {
+    ptr += (context == CtxTest) ? 4 : 2;
+    xprPtr = ptr;
+    needSep = 0;
+}
+
 void QMakeParser::function_openBlock(ushort* &ptr, int &tlen, ushort* &xprPtr,
                                      ushort &needSep, int &wordCount, ushort* &tokPtr,
                                      SubGrammar &grammar, ushort* &buf) {
@@ -815,7 +834,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     function_funcCall(xprStack, parens, quote, term,
                                                       context, argc, wordCount);
                                     wordCount = 0;
-                                    goto nextWord;
+
                                   nextWord:
                                     ptr += (context == CtxTest) ? 4 : 2;
                                     xprPtr = ptr;
@@ -828,21 +847,9 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     }
                                 }
                                 if (term) {
-                                  checkTerm:
-                                    if (c != term) {
-                                        parseError(fL1S("Missing %1 terminator [found %2]")
-                                            .arg(QChar(term))
-                                            .arg(c ? QString(c) : QString::fromLatin1("end-of-line")));
-                                        m_inError = true;
-                                        // Just parse on, as if there was a terminator ...
-                                    } else {
-                                        cur++;
-                                    }
+                                    function_checkTerm(c, term, cur);
                                 }
-                              joinToken:
-                                ptr += (context == CtxTest) ? 4 : 2;
-                                xprPtr = ptr;
-                                needSep = 0;
+                                function_joinToken(ptr, context, xprPtr, needSep);
                                 goto nextChr;
                             }
                         } else if (c == '\\') {
@@ -892,12 +899,15 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                         ptr = buf;
                                         wordCount = 0;
                                         goto nextWord;
-                                    } else if (term == '}') {
-                                        c = (cur == end) ? 0 : *cur;
-                                        goto checkTerm;
                                     } else {
-                                        Q_ASSERT(!term);
-                                        goto joinToken;
+                                        if (term == '}') {
+                                            c = (cur == end) ? 0 : *cur;
+                                            function_checkTerm(c,term,cur);
+                                        } else {
+                                            Q_ASSERT(!term);
+                                        }
+                                        function_joinToken(ptr, context, xprPtr, needSep);
+                                        goto nextChr;
                                     }
                                 }
                             } else if (!parens && c == ',') {
