@@ -411,6 +411,18 @@ void QMakeParser::function_checkTerm(ushort &c,ushort &term, const ushort* &cur)
     }
 }
 
+void QMakeParser::function_doFor(uint &nlen, ushort* &ptr, ushort* &uc, ushort* &tokPtr) {
+    nlen = ptr - uc;
+    putBlockLen(tokPtr, nlen + 1);
+    putBlock(tokPtr, uc, nlen);
+}
+
+void QMakeParser::function_didFor(ushort* &tokPtr) {
+    putTok(tokPtr, TokValueTerminator);
+    enterScope(tokPtr, true, StCtrl);
+    m_blockstack.top().nest |= NestLoop;
+}
+
 void QMakeParser::function_joinToken(ushort* &ptr, Context &context, ushort* &xprPtr,
                                      ushort &needSep) {
     ptr += (context == CtxTest) ? 4 : 2;
@@ -783,6 +795,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
         bool lineCont;
         int indent;
         bool doFlushLine = false;
+        bool doRunLoop = true;
 
         if (context == CtxPureValue) {
             end = inend;
@@ -814,11 +827,12 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                     // Finally, do the tokenization
                     ushort tok, rtok;
 
+                  doRunLoop = true;
                   if(function_newWord(cur, end, c)) {
-                      goto lineEnd;
+                      doRunLoop = false;
                   }
 
-                    while(1) {
+                    while(doRunLoop) {
                         if (c == '$') {
                             if (*cur == '$') { // may be EOF, EOL, WS, '#' or '\\' if past end
 
@@ -841,7 +855,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     needSep = TokNewStr;
 
                                     if(function_newWord(cur, end, c)) {
-                                        goto lineEnd;
+                                        break;
                                     } else {
                                         continue;
                                     }
@@ -865,11 +879,11 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                             if (c == quote) {
                                 quote = 0;
                                 goto nextChr;
-                            } else if (c == '!' && ptr == xprPtr && context == CtxTest) {
+                            } else if ((c == '!') && (ptr == xprPtr) && (context == CtxTest)) {
                                 m_invert++;
                                 goto nextChr;
                             }
-                        } else if (c == '\'' || c == '"') {
+                        } else if ((c == '\'') || (c == '"')) {
                             quote = c;
                             goto nextChr;
                         } else if (context == CtxArgs) {
@@ -910,7 +924,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                         goto nextChr;
                                     }
                                 }
-                            } else if (!parens && c == ',') {
+                            } else if (!(parens) && (c == ',')) {
                                 FLUSH_RHS_LITERAL();
                                 *ptr++ = TokArgSeparator;
                                 argc++;
@@ -991,11 +1005,13 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                               do2Op:
                                 if (*cur == '=') {
                                     cur++;
-                                    goto doOp;
+                                    function_doOp(tokPtr, grammar, wordCount,
+                                                  buf, ptr, tok, tlen, xprPtr, needSep, context);
+                                    wordCount = 0;
+                                    goto nextWord;
                                 }
                             } else if (c == '=') {
                                 tok = TokAssign;
-                              doOp:
                                 function_doOp(tokPtr, grammar, wordCount,
                                               buf, ptr, tok, tlen, xprPtr, needSep, context);
                                 wordCount = 0;
@@ -1022,14 +1038,13 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                         }
                         *ptr++ = c;
                       nextChr:
-                        if (cur == end) {
-                            goto lineEnd;
-                        } else {
+                        if (cur != end) {
                             c = *cur++;
+                        } else {
+                            break;
                         }
                     }
 
-                  lineEnd:
                     if (lineCont) {
                         if (quote) {
                             *ptr++ = ' ';
@@ -1299,39 +1314,40 @@ void QMakeParser::finalizeCall(ushort *&tokPtr, ushort *uc, ushort *ptr, int arg
                         putBlockLen(tokPtr, 1 + 3 + nlen + 1);
                         putTok(tokPtr, TokHashLiteral);
                         putHashStr(tokPtr, uce + 2, nlen);
-                      didFor:
-                        putTok(tokPtr, TokValueTerminator);
-                        enterScope(tokPtr, true, StCtrl);
-                        m_blockstack.top().nest |= NestLoop;
+
+                        function_didFor(tokPtr);
                         return;
                     } else if (*uc == TokArgSeparator && argc == 2) {
                         // for(var, something)
                         uc++;
                         putTok(tokPtr, TokForLoop);
                         putHashStr(tokPtr, uce + 2, nlen);
-                      doFor:
-                        nlen = ptr - uc;
-                        putBlockLen(tokPtr, nlen + 1);
-                        putBlock(tokPtr, uc, nlen);
-                        goto didFor;
+
+                        function_doFor(nlen, ptr, uc, tokPtr);
+                        function_didFor(tokPtr);
+                        return;
                     }
                 } else if (argc == 1) {
                     // for(non-literal) (this wouldn't be here if qmake was sane)
                     putTok(tokPtr, TokForLoop);
                     putHashStr(tokPtr, (ushort *)0, (uint)0);
                     uc = uce;
-                    goto doFor;
+
+                    function_doFor(nlen, ptr, uc, tokPtr);
+                    function_didFor(tokPtr);
+                    return;
                 }
                 parseError(fL1S("Syntax is for(var, list), for(var, forever) or for(ever)."));
                 return;
-            } else if (m_tmp == statics.strdefineReplace) {
-                defName = &statics.strdefineReplace;
-                defType = TokReplaceDef;
-                goto deffunc;
-            } else if (m_tmp == statics.strdefineTest) {
-                defName = &statics.strdefineTest;
-                defType = TokTestDef;
-              deffunc:
+            } else if ((m_tmp == statics.strdefineReplace) || (m_tmp == statics.strdefineTest)){
+                if(m_tmp == statics.strdefineReplace) {
+                    defName = &statics.strdefineReplace;
+                    defType = TokReplaceDef;
+                } else { //(m_tmp == statics.strdefineTest)
+                    defName = &statics.strdefineTest;
+                    defType = TokTestDef;
+                }
+
                 if (m_invert) {
                     bogusTest(tokPtr, fL1S("Unexpected NOT operator in front of function definition."));
                     return;

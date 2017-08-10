@@ -210,6 +210,8 @@ private:
     bool function_newWord(const ushort *&cur, const ushort *&end, ushort &c);
     void function_checkTerm(ushort &c, ushort &term, const ushort *&cur);
     void function_joinToken(ushort *&ptr, Context &context, ushort *&xprPtr, ushort &needSep);
+    void function_doFor(uint &nlen, ushort *&ptr, ushort *&uc, ushort *&tokPtr);
+    void function_didFor(ushort *&tokPtr);
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(QMakeParser::ParseFlags)
