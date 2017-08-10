@@ -803,6 +803,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
         bool doFlushLine = false;
         bool doRunLoop = true;
         bool gotoNextWord = false;
+        bool gotoNextChr = false;
 
         if (context == CtxPureValue) {
             end = inend;
@@ -840,6 +841,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                   }
 
                     while(doRunLoop) {
+                        gotoNextChr = false;
                         gotoNextWord = false;
                         if (c == '$') {
                             if (*cur == '$') { // may be EOF, EOL, WS, '#' or '\\' if past end
@@ -869,7 +871,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     function_checkTerm(c, term, cur);
                                 }
                                 function_joinToken(ptr, context, xprPtr, needSep);
-                                goto nextChr;
+                                gotoNextChr = true;
                             }
                         } else if (c == '\\') {
                             static const char symbols[] = "[]{}()$\\'\"";
@@ -883,14 +885,14 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                         } else if (quote) {
                             if (c == quote) {
                                 quote = 0;
-                                goto nextChr;
+                                gotoNextChr = true;
                             } else if ((c == '!') && (ptr == xprPtr) && (context == CtxTest)) {
                                 m_invert++;
-                                goto nextChr;
+                                gotoNextChr = true;
                             }
                         } else if ((c == '\'') || (c == '"')) {
                             quote = c;
-                            goto nextChr;
+                            gotoNextChr = true;
                         } else if (context == CtxArgs) {
                             // Function arg context
                             if (c == ' ' || c == '\t') {
@@ -926,7 +928,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                             Q_ASSERT(!term);
                                         }
                                         function_joinToken(ptr, context, xprPtr, needSep);
-                                        goto nextChr;
+                                        gotoNextChr = true;
                                     }
                                 }
                             } else if (!(parens) && (c == ',')) {
@@ -940,7 +942,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                             // Test or LHS context
                             if (c == '!' && ptr == xprPtr) {
                                                             m_invert++;
-                                                            goto nextChr;
+                                                            gotoNextChr = true;
                             } else {
                                 gotoNextWord = true;
                                 if (c == ' ' || c == '\t') {
@@ -1056,7 +1058,10 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                             }
                         }
 
-                        *ptr++ = c;
+                        if(!gotoNextChr) {
+                            *ptr++ = c;
+                        }
+
                       nextChr:
                         if (cur != end) {
                             c = *cur++;
