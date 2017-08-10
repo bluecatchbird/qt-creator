@@ -812,11 +812,10 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
 
                                 if ((tok & TokMask) == TokFuncName) {
                                     cur++;
-                                  funcCall:
                                     function_funcCall(xprStack, parens, quote, term,
                                                       context, argc, wordCount);
-                                  nextToken:
                                     wordCount = 0;
+                                    goto nextWord;
                                   nextWord:
                                     ptr += (context == CtxTest) ? 4 : 2;
                                     xprPtr = ptr;
@@ -890,7 +889,9 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     }
                                     if (term == ':') {
                                         finalizeCall(tokPtr, buf, ptr, theargc);
-                                        goto nextItem;
+                                        ptr = buf;
+                                        wordCount = 0;
+                                        goto nextWord;
                                     } else if (term == '}') {
                                         c = (cur == end) ? 0 : *cur;
                                         goto checkTerm;
@@ -903,7 +904,8 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                 FLUSH_RHS_LITERAL();
                                 *ptr++ = TokArgSeparator;
                                 argc++;
-                                goto nextToken;
+                                wordCount = 0;
+                                goto nextWord;
                             }
                         } else if (context == CtxTest) {
                             // Test or LHS context
@@ -921,7 +923,10 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                 }
                                 *ptr++ = TokTestCall;
                                 term = ':';
-                                goto funcCall;
+                                function_funcCall(xprStack, parens, quote, term,
+                                                  context, argc, wordCount);
+                                wordCount = 0;
+                                goto nextWord;
                             } else if (c == '!' && ptr == xprPtr) {
                                 m_invert++;
                                 goto nextChr;
@@ -933,9 +938,9 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     parseError(fL1S("AND operator without prior condition."));
                                 else
                                     m_operator = AndOperator;
-                              nextItem:
                                 ptr = buf;
-                                goto nextToken;
+                                wordCount = 0;
+                                goto nextWord;
                             } else if (c == '|') {
                                 FLUSH_LHS_LITERAL();
                                 finalizeCond(tokPtr, buf, ptr, wordCount);
@@ -944,18 +949,24 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     parseError(fL1S("OR operator without prior condition."));
                                 else
                                     m_operator = OrOperator;
-                                goto nextItem;
+                                ptr = buf;
+                                wordCount = 0;
+                                goto nextWord;
                             } else if (c == '{') {
                                 function_openBlock(ptr, tlen, xprPtr, needSep, wordCount,
                                                    tokPtr, grammar, buf);
-                                goto nextItem;
+                                ptr = buf;
+                                wordCount = 0;
+                                goto nextWord;
                             } else if (c == '}') {
                                 FLUSH_LHS_LITERAL();
                                 finalizeCond(tokPtr, buf, ptr, wordCount);
                                 m_state = StNew; // De-facto newline
                               closeScope:
                                 function_closeScope(tokPtr);
-                                goto nextItem;
+                                ptr = buf;
+                                wordCount = 0;
+                                goto nextWord;
                             } else if (c == '+') {
                                 tok = TokAppend;
                                 goto do2Op;
@@ -977,7 +988,8 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                               doOp:
                                 function_doOp(tokPtr, grammar, wordCount,
                                               buf, ptr, tok, tlen, xprPtr, needSep, context);
-                                goto nextToken;
+                                wordCount = 0;
+                                goto nextWord;
                             }
                         } else if (context == CtxValue) {
                             if (c == ' ' || c == '\t') {
