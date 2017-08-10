@@ -99,6 +99,7 @@ public:
     static QString formatProBlock(const QString &block);
 #endif
 
+
 private:
     enum ScopeNesting {
         NestNone = 0,
@@ -191,6 +192,16 @@ private:
     template<typename T> friend class QTypeInfo;
 
     friend class ProFileCache;
+    void function_flerror(Context &context, ushort *&tokPtr);
+    void function_flush_value_list(int &wordCount, ushort *&xprPtr, ushort *&tokPtr, ushort *&ptr);
+    void function_flush_literal(Context &context, ushort *&ptr, int &tlen, ushort *&xprPtr, ushort &needSep, int &wordCount);
+    void function_flushLine(ushort &quote, QStack<ParseCtx> &xprStack, Context &context, int &parens, ushort *&tokPtr, ushort *&ptr, ushort *&buf, int &wordCount, ushort *&xprPtr, int &tlen, ushort &needSep);
+    void function_doOp(ushort *&tokPtr, SubGrammar &grammar, int &wordCount, ushort *&buf, ushort *&ptr, ushort &tok, int &tlen, ushort *&xprPtr, ushort &needSep, Context &context);
+    void function_flush_lhs_literal(ushort *&ptr, int &tlen, ushort *&xprPtr, ushort &needSep, int &wordCount);
+    void function_closeScope(ushort *&tokPtr);
+    void function_openBlock(ushort *&ptr, int &tlen, ushort *&xprPtr, ushort &needSep, int &wordCount, ushort *&tokPtr, SubGrammar &grammar, ushort *&buf);
+    void function_nofunc(ushort *&ptr, ushort *&xprPtr, ushort &quote, ushort &needSep, ushort &tok, QString &tokBuff, int &wordCount, int &tlen, ushort *&tokPtr, ushort &rtok, ushort *&buf, QString &xprBuff, const QStringRef &in, const ushort *&cur);
+    void function_stripComments(const ushort *&cur, const ushort *&cptr, ushort &c);
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(QMakeParser::ParseFlags)

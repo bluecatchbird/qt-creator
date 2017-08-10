@@ -307,6 +307,243 @@ void QMakeParser::finalizeHashStr(ushort *buf, uint len)
     buf[-2] = (ushort)(hash >> 16);
 }
 
+
+#define FLUSH_LHS_LITERAL() \
+    do { \
+        if ((tlen = ptr - xprPtr)) { \
+            finalizeHashStr(xprPtr, tlen); \
+            if (needSep) { \
+                wordCount++; \
+                needSep = 0; \
+            } \
+        } else { \
+            ptr -= 4; \
+        } \
+    } while (0)
+
+#define FLUSH_RHS_LITERAL() \
+    do { \
+        if ((tlen = ptr - xprPtr)) { \
+            xprPtr[-2] = TokLiteral | needSep; \
+            xprPtr[-1] = tlen; \
+            if (needSep) { \
+                wordCount++; \
+                needSep = 0; \
+            } \
+        } else { \
+            ptr -= 2; \
+        } \
+    } while (0)
+
+#define FLUSH_LITERAL() \
+    do { \
+        if (context == CtxTest) \
+            FLUSH_LHS_LITERAL(); \
+        else \
+            FLUSH_RHS_LITERAL(); \
+    } while (0)
+
+#define FLUSH_VALUE_LIST() \
+    do { \
+        if (wordCount > 1) { \
+            xprPtr = tokPtr; \
+            if (*xprPtr == TokLine) \
+                xprPtr += 2; \
+            tokPtr[-1] = ((*xprPtr & TokMask) == TokLiteral) ? wordCount : 0; \
+        } else { \
+            tokPtr[-1] = 0; \
+        } \
+        tokPtr = ptr; \
+        putTok(tokPtr, TokValueTerminator); \
+    } while (0)
+
+
+void QMakeParser::function_flerror(Context &context, ushort* &tokPtr) {
+    m_proFile->setOk(false);
+    if (context == CtxValue) {
+        tokPtr[-1] = 0; // sizehint
+        putTok(tokPtr, TokValueTerminator);
+    } else if (context == CtxPureValue) {
+        putTok(tokPtr, TokValueTerminator);
+    } else {
+        bogusTest(tokPtr, QString());
+    }
+}
+
+void QMakeParser::function_flush_value_list(int &wordCount, ushort* &xprPtr,
+                                            ushort* &tokPtr, ushort* &ptr) {
+    FLUSH_VALUE_LIST();
+}
+
+void QMakeParser::function_flush_literal(Context &context,ushort* &ptr, int &tlen,
+                                         ushort* &xprPtr, ushort &needSep, int &wordCount) {
+    FLUSH_LITERAL();
+}
+
+void QMakeParser::function_flush_lhs_literal(ushort* &ptr, int &tlen,
+                                             ushort* &xprPtr, ushort &needSep, int &wordCount) {
+    FLUSH_LHS_LITERAL();
+}
+
+void QMakeParser::function_closeScope(ushort* &tokPtr) {
+    flushScopes(tokPtr);
+    failOperator("in front of closing brace");
+    if (!m_blockstack.top().braceLevel) {
+        parseError(fL1S("Excess closing brace."));
+    } else if (!--m_blockstack.top().braceLevel
+               && m_blockstack.count() != 1) {
+        leaveScope(tokPtr);
+        m_state = StNew;
+        m_canElse = false;
+        m_markLine = m_lineNo;
+    }
+}
+
+void QMakeParser::function_openBlock(ushort* &ptr, int &tlen, ushort* &xprPtr,
+                                     ushort &needSep, int &wordCount, ushort* &tokPtr,
+                                     SubGrammar &grammar, ushort* &buf) {
+    function_flush_lhs_literal(ptr, tlen, xprPtr, needSep, wordCount);
+    finalizeCond(tokPtr, buf, ptr, wordCount);
+    if (m_operator == AndOperator) {
+        languageWarning(fL1S("Excess colon in front of opening brace."));
+        m_operator = NoOperator;
+    }
+    failOperator("in front of opening brace");
+    flushCond(tokPtr);
+    m_state = StNew; // Reset possible StCtrl, so colons get rejected.
+    ++m_blockstack.top().braceLevel;
+    if (grammar == TestGrammar)
+        parseError(fL1S("Opening scope not permitted in this context."));
+}
+
+void QMakeParser::function_stripComments(const ushort* &cur,const ushort* &cptr, ushort &c) {
+    // Then strip comments. Yep - no escaping is possible.
+    for (cptr = cur;; ++cptr) {
+        if (cptr == inend) {
+            end = cptr;
+            break;
+        }
+        c = *cptr;
+        if (c == '#') {
+            end = cptr;
+            while (++cptr < inend) {
+                if (*cptr == '\n') {
+                    ++cptr;
+                    break;
+                }
+            }
+            if (end == cur) { // Line with only a comment (sans whitespace)
+                if (m_markLine == m_lineNo)
+                    m_markLine++;
+                // Qmake bizarreness: such lines do not affect line continuations
+                goto ignore;
+            }
+            break;
+        }
+        if (c == '\n') {
+            end = cptr++;
+            break;
+        }
+    }
+}
+
+void QMakeParser::function_nofunc(ushort* &ptr, ushort* &xprPtr, ushort &quote,
+                                  ushort &needSep, ushort& tok, QString &tokBuff,
+                                  int &wordCount, int &tlen, ushort* &tokPtr,
+                                  ushort &rtok, ushort* &buf, QString &xprBuff,
+                                  const QStringRef &in, const ushort* &cur) {
+    if (ptr == xprPtr)
+        languageWarning(fL1S("Missing name in expansion"));
+    if (quote)
+        tok |= TokQuoted;
+    if (needSep) {
+        tok |= needSep;
+        wordCount++;
+    }
+    tlen = ptr - xprPtr;
+    if (rtok != TokVariable
+        || !resolveVariable(xprPtr, tlen, needSep, &ptr,
+                            &buf, &xprBuff, &tokPtr, &tokBuff, cur, in)) {
+        if (rtok == TokVariable || rtok == TokProperty) {
+            xprPtr[-4] = tok;
+            uint hash = ProString::hash((const QChar *)xprPtr, tlen);
+            xprPtr[-3] = (ushort)hash;
+            xprPtr[-2] = (ushort)(hash >> 16);
+            xprPtr[-1] = tlen;
+        } else {
+            xprPtr[-2] = tok;
+            xprPtr[-1] = tlen;
+        }
+    }
+}
+
+void QMakeParser::function_doOp(ushort* &tokPtr, SubGrammar &grammar, int &wordCount,
+                                 ushort* &buf, ushort* &ptr, ushort &tok, int &tlen,
+                                 ushort* &xprPtr, ushort &needSep, Context &context) {
+
+    function_flush_lhs_literal(ptr, tlen, xprPtr, needSep, wordCount);
+    flushCond(tokPtr);
+    acceptColon("in front of assignment");
+    putLineMarker(tokPtr);
+    if (grammar == TestGrammar) {
+        parseError(fL1S("Assignment not permitted in this context."));
+    } else if (wordCount != 1) {
+        parseError(fL1S("Assignment needs exactly one word on the left hand side."));
+        // Put empty variable name.
+    } else {
+        putBlock(tokPtr, buf, ptr - buf);
+    }
+    putTok(tokPtr, tok);
+    context = CtxValue;
+    ptr = ++tokPtr;
+}
+
+void QMakeParser::function_flushLine(ushort &quote,QStack<ParseCtx> &xprStack,Context& context,
+                                     int &parens, ushort* &tokPtr, ushort* &ptr, ushort* &buf,
+                                     int &wordCount, ushort* &xprPtr, int &tlen, ushort &needSep) {
+
+    function_flush_literal(context, ptr, tlen, xprPtr, needSep, wordCount);
+
+    if (quote) {
+        parseError(fL1S("Missing closing %1 quote").arg(QChar(quote)));
+        if (!xprStack.isEmpty()) {
+            context = xprStack.at(0).context;
+            xprStack.clear();
+        }
+        function_flerror(context,tokPtr);
+    } else if (!xprStack.isEmpty()) {
+        parseError(fL1S("Missing closing parenthesis in function call"));
+        context = xprStack.at(0).context;
+        xprStack.clear();
+        function_flerror(context, tokPtr);
+    } else if (context == CtxValue) {
+        //FLUSH_VALUE_LIST();
+        function_flush_value_list(wordCount, xprPtr, tokPtr, ptr);
+        if (parens)
+            languageWarning(fL1S("Possible braces mismatch"));
+    } else if (context == CtxPureValue) {
+        tokPtr = ptr;
+        putTok(tokPtr, TokValueTerminator);
+    } else {
+        finalizeCond(tokPtr, buf, ptr, wordCount);
+        warnOperator("at end of line");
+    }
+}
+/* pro:
+    m_directoryName
+    m_fileName
+    m_ok
+    m_proitems
+    m_refCount
+
+    in:
+        full file
+    line:
+        line number?
+    grammar:
+        ?
+
+*/
 void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar grammar)
 {
     m_proFile = pro;
@@ -383,56 +620,6 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
         ptr = buf + 4;
     }
     ushort *xprPtr = ptr;
-
-#define FLUSH_LHS_LITERAL() \
-    do { \
-        if ((tlen = ptr - xprPtr)) { \
-            finalizeHashStr(xprPtr, tlen); \
-            if (needSep) { \
-                wordCount++; \
-                needSep = 0; \
-            } \
-        } else { \
-            ptr -= 4; \
-        } \
-    } while (0)
-
-#define FLUSH_RHS_LITERAL() \
-    do { \
-        if ((tlen = ptr - xprPtr)) { \
-            xprPtr[-2] = TokLiteral | needSep; \
-            xprPtr[-1] = tlen; \
-            if (needSep) { \
-                wordCount++; \
-                needSep = 0; \
-            } \
-        } else { \
-            ptr -= 2; \
-        } \
-    } while (0)
-
-#define FLUSH_LITERAL() \
-    do { \
-        if (context == CtxTest) \
-            FLUSH_LHS_LITERAL(); \
-        else \
-            FLUSH_RHS_LITERAL(); \
-    } while (0)
-
-#define FLUSH_VALUE_LIST() \
-    do { \
-        if (wordCount > 1) { \
-            xprPtr = tokPtr; \
-            if (*xprPtr == TokLine) \
-                xprPtr += 2; \
-            tokPtr[-1] = ((*xprPtr & TokMask) == TokLiteral) ? wordCount : 0; \
-        } else { \
-            tokPtr[-1] = 0; \
-        } \
-        tokPtr = ptr; \
-        putTok(tokPtr, TokValueTerminator); \
-    } while (0)
-
     const ushort *end; // End of this line
     const ushort *cptr; // Start of next line
     bool lineCont;
@@ -463,7 +650,8 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
             if (c != ' ' && c != '\t' && c != '\r')
                 break;
         }
-
+#if 0
+        function_stripComments(cur, cptr, c)
         // Then strip comments. Yep - no escaping is possible.
         for (cptr = cur;; ++cptr) {
             if (cptr == inend) {
@@ -492,7 +680,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                 break;
             }
         }
-
+#endif
         // Then look for line continuations. Yep - no escaping here as well.
         forever {
             // We don't have to check for underrun here, as we already determined
@@ -564,29 +752,12 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                         if (tok == TokVariable && c == '(')
                             tok = TokFuncName;
                       notfunc:
-                        if (ptr == xprPtr)
-                            languageWarning(fL1S("Missing name in expansion"));
-                        if (quote)
-                            tok |= TokQuoted;
-                        if (needSep) {
-                            tok |= needSep;
-                            wordCount++;
-                        }
-                        tlen = ptr - xprPtr;
-                        if (rtok != TokVariable
-                            || !resolveVariable(xprPtr, tlen, needSep, &ptr,
-                                                &buf, &xprBuff, &tokPtr, &tokBuff, cur, in)) {
-                            if (rtok == TokVariable || rtok == TokProperty) {
-                                xprPtr[-4] = tok;
-                                uint hash = ProString::hash((const QChar *)xprPtr, tlen);
-                                xprPtr[-3] = (ushort)hash;
-                                xprPtr[-2] = (ushort)(hash >> 16);
-                                xprPtr[-1] = tlen;
-                            } else {
-                                xprPtr[-2] = tok;
-                                xprPtr[-1] = tlen;
-                            }
-                        }
+                        function_nofunc(ptr, xprPtr, quote,
+                                        needSep, tok, tokBuff,
+                                        wordCount, tlen, tokPtr,
+                                        rtok, buf, xprBuff,
+                                        in, cur);
+
                         if ((tok & TokMask) == TokFuncName) {
                             cur++;
                           funcCall:
@@ -731,35 +902,15 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                             m_operator = OrOperator;
                         goto nextItem;
                     } else if (c == '{') {
-                        FLUSH_LHS_LITERAL();
-                        finalizeCond(tokPtr, buf, ptr, wordCount);
-                        if (m_operator == AndOperator) {
-                            languageWarning(fL1S("Excess colon in front of opening brace."));
-                            m_operator = NoOperator;
-                        }
-                        failOperator("in front of opening brace");
-                        flushCond(tokPtr);
-                        m_state = StNew; // Reset possible StCtrl, so colons get rejected.
-                        ++m_blockstack.top().braceLevel;
-                        if (grammar == TestGrammar)
-                            parseError(fL1S("Opening scope not permitted in this context."));
+                        function_openBlock(ptr, tlen, xprPtr, needSep, wordCount,
+                                           tokPtr, grammar, buf);
                         goto nextItem;
                     } else if (c == '}') {
                         FLUSH_LHS_LITERAL();
                         finalizeCond(tokPtr, buf, ptr, wordCount);
                         m_state = StNew; // De-facto newline
                       closeScope:
-                        flushScopes(tokPtr);
-                        failOperator("in front of closing brace");
-                        if (!m_blockstack.top().braceLevel) {
-                            parseError(fL1S("Excess closing brace."));
-                        } else if (!--m_blockstack.top().braceLevel
-                                   && m_blockstack.count() != 1) {
-                            leaveScope(tokPtr);
-                            m_state = StNew;
-                            m_canElse = false;
-                            m_markLine = m_lineNo;
-                        }
+                        function_closeScope(tokPtr);
                         goto nextItem;
                     } else if (c == '+') {
                         tok = TokAppend;
@@ -780,21 +931,8 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                     } else if (c == '=') {
                         tok = TokAssign;
                       doOp:
-                        FLUSH_LHS_LITERAL();
-                        flushCond(tokPtr);
-                        acceptColon("in front of assignment");
-                        putLineMarker(tokPtr);
-                        if (grammar == TestGrammar) {
-                            parseError(fL1S("Assignment not permitted in this context."));
-                        } else if (wordCount != 1) {
-                            parseError(fL1S("Assignment needs exactly one word on the left hand side."));
-                            // Put empty variable name.
-                        } else {
-                            putBlock(tokPtr, buf, ptr - buf);
-                        }
-                        putTok(tokPtr, tok);
-                        context = CtxValue;
-                        ptr = ++tokPtr;
+                        function_doOp(tokPtr, grammar, wordCount,
+                                      buf, ptr, tok, tlen, xprPtr, needSep, context);
                         goto nextToken;
                     }
                 } else if (context == CtxValue) {
@@ -836,39 +974,8 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
             } else {
                 cur = cptr;
               flushLine:
-                FLUSH_LITERAL();
-                if (quote) {
-                    parseError(fL1S("Missing closing %1 quote").arg(QChar(quote)));
-                    if (!xprStack.isEmpty()) {
-                        context = xprStack.at(0).context;
-                        xprStack.clear();
-                    }
-                    goto flErr;
-                } else if (!xprStack.isEmpty()) {
-                    parseError(fL1S("Missing closing parenthesis in function call"));
-                    context = xprStack.at(0).context;
-                    xprStack.clear();
-                  flErr:
-                    pro->setOk(false);
-                    if (context == CtxValue) {
-                        tokPtr[-1] = 0; // sizehint
-                        putTok(tokPtr, TokValueTerminator);
-                    } else if (context == CtxPureValue) {
-                        putTok(tokPtr, TokValueTerminator);
-                    } else {
-                        bogusTest(tokPtr, QString());
-                    }
-                } else if (context == CtxValue) {
-                    FLUSH_VALUE_LIST();
-                    if (parens)
-                        languageWarning(fL1S("Possible braces mismatch"));
-                } else if (context == CtxPureValue) {
-                    tokPtr = ptr;
-                    putTok(tokPtr, TokValueTerminator);
-                } else {
-                    finalizeCond(tokPtr, buf, ptr, wordCount);
-                    warnOperator("at end of line");
-                }
+                function_flushLine(quote, xprStack, context, parens, tokPtr, ptr, buf,
+                                   wordCount, xprPtr, tlen, needSep);
                 if (!cur)
                     break;
                 ++m_lineNo;
