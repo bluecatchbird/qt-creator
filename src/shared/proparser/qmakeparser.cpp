@@ -665,6 +665,12 @@ void QMakeParser::function_ignore(const ushort* &cur, const ushort* &cptr) {
     ++m_lineNo;
 }
 
+void QMakeParser::function_nextWord(ushort* &ptr, Context &context, ushort* &xprPtr, ushort &needSep) {
+    ptr += (context == CtxTest) ? 4 : 2;
+    xprPtr = ptr;
+    needSep = TokNewStr;
+}
+
 bool QMakeParser::function_newWord(const ushort* &cur, const ushort* &end, ushort &c) {
     do {
         if (cur == end) {
@@ -796,6 +802,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
         int indent;
         bool doFlushLine = false;
         bool doRunLoop = true;
+        bool gotoNextWord = false;
 
         if (context == CtxPureValue) {
             end = inend;
@@ -833,6 +840,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                   }
 
                     while(doRunLoop) {
+                        gotoNextWord = false;
                         if (c == '$') {
                             if (*cur == '$') { // may be EOF, EOL, WS, '#' or '\\' if past end
 
@@ -849,10 +857,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                                       context, argc, wordCount);
                                     wordCount = 0;
 
-                                  nextWord:
-                                    ptr += (context == CtxTest) ? 4 : 2;
-                                    xprPtr = ptr;
-                                    needSep = TokNewStr;
+                                    function_nextWord(ptr, context, xprPtr, needSep);
 
                                     if(function_newWord(cur, end, c)) {
                                         break;
@@ -890,7 +895,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                             // Function arg context
                             if (c == ' ' || c == '\t') {
                                 FLUSH_RHS_LITERAL();
-                                goto nextWord;
+                                gotoNextWord = true;
                             } else if (c == '(') {
                                 ++parens;
                             } else if (c == ')') {
@@ -912,7 +917,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                         finalizeCall(tokPtr, buf, ptr, theargc);
                                         ptr = buf;
                                         wordCount = 0;
-                                        goto nextWord;
+                                        gotoNextWord = true;
                                     } else {
                                         if (term == '}') {
                                             c = (cur == end) ? 0 : *cur;
@@ -929,7 +934,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                 *ptr++ = TokArgSeparator;
                                 argc++;
                                 wordCount = 0;
-                                goto nextWord;
+                                gotoNextWord = true;
                             }
                         } else if (context == CtxTest) {
                             // Test or LHS context
@@ -937,7 +942,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                                             m_invert++;
                                                             goto nextChr;
                             } else {
-                                bool gotoNextWord = true;
+                                gotoNextWord = true;
                                 if (c == ' ' || c == '\t') {
                                     FLUSH_LHS_LITERAL();
                                 } else if (c == '(') {
@@ -1016,10 +1021,6 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                 } else {
                                     gotoNextWord = false;
                                 }
-
-                                if ( gotoNextWord ) {
-                                    goto nextWord;
-                                }
                             }
                         } else if (context == CtxValue) {
                             if (c == '{') {
@@ -1030,7 +1031,6 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                 if (indent < lastIndent)
                                     languageWarning(fL1S("Possible accidental line continuation"));
                             } else {
-                                bool skipNextWord = false;
                                 if ((c == '}') && (!parens)) {
                                     FLUSH_RHS_LITERAL();
                                     FLUSH_VALUE_LIST();
@@ -1038,16 +1038,24 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     function_closeScope(tokPtr);
                                     ptr = buf;
                                     wordCount = 0;
+                                    gotoNextWord = true;
                                 } else if ((c == ' ') || (c == '\t')) {
                                     FLUSH_RHS_LITERAL();
-                                } else {
-                                    skipNextWord = true;
-                                }
-                                if(!skipNextWord) {
-                                    goto nextWord;
+                                    gotoNextWord = true;
                                 }
                             }
                         }
+
+                        if ( gotoNextWord ) {
+                            function_nextWord(ptr, context, xprPtr, needSep);
+
+                            if(function_newWord(cur, end, c)) {
+                                break;
+                            } else {
+                                continue;
+                            }
+                        }
+
                         *ptr++ = c;
                       nextChr:
                         if (cur != end) {
