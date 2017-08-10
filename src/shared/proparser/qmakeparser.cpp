@@ -1022,25 +1022,30 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                 }
                             }
                         } else if (context == CtxValue) {
-                            if (c == ' ' || c == '\t') {
-                                FLUSH_RHS_LITERAL();
-                                goto nextWord;
-                            } else if (c == '{') {
+                            if (c == '{') {
                                 ++parens;
-                            } else if (c == '}') {
-                                if (!parens) {
+                            } else if ((c == '}') && (parens)) {
+                                --parens;
+                            } else if (c == '=') {
+                                if (indent < lastIndent)
+                                    languageWarning(fL1S("Possible accidental line continuation"));
+                            } else {
+                                bool skipNextWord = false;
+                                if ((c == '}') && (!parens)) {
                                     FLUSH_RHS_LITERAL();
                                     FLUSH_VALUE_LIST();
                                     context = CtxTest;
                                     function_closeScope(tokPtr);
                                     ptr = buf;
                                     wordCount = 0;
+                                } else if ((c == ' ') || (c == '\t')) {
+                                    FLUSH_RHS_LITERAL();
+                                } else {
+                                    skipNextWord = true;
+                                }
+                                if(!skipNextWord) {
                                     goto nextWord;
                                 }
-                                --parens;
-                            } else if (c == '=') {
-                                if (indent < lastIndent)
-                                    languageWarning(fL1S("Possible accidental line continuation"));
                             }
                         }
                         *ptr++ = c;
