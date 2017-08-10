@@ -933,89 +933,99 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                             }
                         } else if (context == CtxTest) {
                             // Test or LHS context
-                            if (c == ' ' || c == '\t') {
-                                FLUSH_LHS_LITERAL();
-                                goto nextWord;
-                            } else if (c == '(') {
-                                FLUSH_LHS_LITERAL();
-                                if (wordCount != 1) {
-                                    if (wordCount)
-                                        parseError(fL1S("Extra characters after test expression."));
+                            if (c == '!' && ptr == xprPtr) {
+                                                            m_invert++;
+                                                            goto nextChr;
+                            } else {
+                                bool gotoNextWord = false;
+                                if (c == ' ' || c == '\t') {
+                                    FLUSH_LHS_LITERAL();
+                                    gotoNextWord = true;
+                                } else if (c == '(') {
+                                    FLUSH_LHS_LITERAL();
+                                    if (wordCount != 1) {
+                                        if (wordCount)
+                                            parseError(fL1S("Extra characters after test expression."));
+                                        else
+                                            parseError(fL1S("Opening parenthesis without prior test name."));
+                                        ptr = buf; // Put empty function name
+                                    }
+                                    *ptr++ = TokTestCall;
+                                    term = ':';
+                                    function_funcCall(xprStack, parens, quote, term,
+                                                      context, argc, wordCount);
+                                    wordCount = 0;
+                                    gotoNextWord = true;
+                                } else if (c == ':') {
+                                    FLUSH_LHS_LITERAL();
+                                    finalizeCond(tokPtr, buf, ptr, wordCount);
+                                    warnOperator("in front of AND operator");
+                                    if (m_state == StNew)
+                                        parseError(fL1S("AND operator without prior condition."));
                                     else
-                                        parseError(fL1S("Opening parenthesis without prior test name."));
-                                    ptr = buf; // Put empty function name
-                                }
-                                *ptr++ = TokTestCall;
-                                term = ':';
-                                function_funcCall(xprStack, parens, quote, term,
-                                                  context, argc, wordCount);
-                                wordCount = 0;
-                                goto nextWord;
-                            } else if (c == '!' && ptr == xprPtr) {
-                                m_invert++;
-                                goto nextChr;
-                            } else if (c == ':') {
-                                FLUSH_LHS_LITERAL();
-                                finalizeCond(tokPtr, buf, ptr, wordCount);
-                                warnOperator("in front of AND operator");
-                                if (m_state == StNew)
-                                    parseError(fL1S("AND operator without prior condition."));
-                                else
-                                    m_operator = AndOperator;
-                                ptr = buf;
-                                wordCount = 0;
-                                goto nextWord;
-                            } else if (c == '|') {
-                                FLUSH_LHS_LITERAL();
-                                finalizeCond(tokPtr, buf, ptr, wordCount);
-                                warnOperator("in front of OR operator");
-                                if (m_state != StCond)
-                                    parseError(fL1S("OR operator without prior condition."));
-                                else
-                                    m_operator = OrOperator;
-                                ptr = buf;
-                                wordCount = 0;
-                                goto nextWord;
-                            } else if (c == '{') {
-                                function_openBlock(ptr, tlen, xprPtr, needSep, wordCount,
-                                                   tokPtr, grammar, buf);
-                                ptr = buf;
-                                wordCount = 0;
-                                goto nextWord;
-                            } else if (c == '}') {
-                                FLUSH_LHS_LITERAL();
-                                finalizeCond(tokPtr, buf, ptr, wordCount);
-                                m_state = StNew; // De-facto newline
-                              closeScope:
-                                function_closeScope(tokPtr);
-                                ptr = buf;
-                                wordCount = 0;
-                                goto nextWord;
-                            } else if (c == '+') {
-                                tok = TokAppend;
-                                goto do2Op;
-                            } else if (c == '-') {
-                                tok = TokRemove;
-                                goto do2Op;
-                            } else if (c == '*') {
-                                tok = TokAppendUnique;
-                                goto do2Op;
-                            } else if (c == '~') {
-                                tok = TokReplace;
-                              do2Op:
-                                if (*cur == '=') {
-                                    cur++;
+                                        m_operator = AndOperator;
+                                    ptr = buf;
+                                    wordCount = 0;
+                                    gotoNextWord = true;
+                                } else if (c == '|') {
+                                    FLUSH_LHS_LITERAL();
+                                    finalizeCond(tokPtr, buf, ptr, wordCount);
+                                    warnOperator("in front of OR operator");
+                                    if (m_state != StCond)
+                                        parseError(fL1S("OR operator without prior condition."));
+                                    else
+                                        m_operator = OrOperator;
+                                    ptr = buf;
+                                    wordCount = 0;
+                                    gotoNextWord = true;
+                                } else if (c == '{') {
+                                    function_openBlock(ptr, tlen, xprPtr, needSep, wordCount,
+                                                       tokPtr, grammar, buf);
+                                    ptr = buf;
+                                    wordCount = 0;
+                                    gotoNextWord = true;
+                                } else if (c == '}') {
+                                    FLUSH_LHS_LITERAL();
+                                    finalizeCond(tokPtr, buf, ptr, wordCount);
+                                    m_state = StNew; // De-facto newline
+                                    function_closeScope(tokPtr);
+                                    ptr = buf;
+                                    wordCount = 0;
+                                    gotoNextWord = true;
+                                } else if ((c == '+') || \
+                                           (c == '-') || \
+                                           (c == '*') || \
+                                           (c == '~')){
+                                    if(c == '+') {
+                                        tok = TokAppend;
+                                    } else if(c == '-') {
+                                        tok = TokRemove;
+                                    } else if(c == '*') {
+                                        tok = TokAppendUnique;
+                                    } else if(c == '~') {
+                                        tok = TokReplace;
+                                    }
+
+                                    if (*cur == '=') {
+                                        cur++;
+                                        function_doOp(tokPtr, grammar, wordCount,
+                                                      buf, ptr, tok, tlen, xprPtr, needSep, context);
+                                        wordCount = 0;
+                                        gotoNextWord = true;
+                                    } else {
+                                        gotoNextWord = false;
+                                    }
+                                } else if (c == '=') {
+                                    tok = TokAssign;
                                     function_doOp(tokPtr, grammar, wordCount,
                                                   buf, ptr, tok, tlen, xprPtr, needSep, context);
                                     wordCount = 0;
+                                    gotoNextWord = true;
+                                }
+
+                                if ( gotoNextWord ) {
                                     goto nextWord;
                                 }
-                            } else if (c == '=') {
-                                tok = TokAssign;
-                                function_doOp(tokPtr, grammar, wordCount,
-                                              buf, ptr, tok, tlen, xprPtr, needSep, context);
-                                wordCount = 0;
-                                goto nextWord;
                             }
                         } else if (context == CtxValue) {
                             if (c == ' ' || c == '\t') {
@@ -1028,7 +1038,10 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     FLUSH_RHS_LITERAL();
                                     FLUSH_VALUE_LIST();
                                     context = CtxTest;
-                                    goto closeScope;
+                                    function_closeScope(tokPtr);
+                                    ptr = buf;
+                                    wordCount = 0;
+                                    goto nextWord;
                                 }
                                 --parens;
                             } else if (c == '=') {
