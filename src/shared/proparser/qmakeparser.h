@@ -201,7 +201,7 @@ private:
     void function_closeScope(ushort *&tokPtr);
     void function_openBlock(ushort *&ptr, int &tlen, ushort *&xprPtr, ushort &needSep, int &wordCount, ushort *&tokPtr, SubGrammar &grammar, ushort *&buf);
     void function_nofunc(ushort *&ptr, ushort *&xprPtr, ushort &quote, ushort &needSep, ushort &tok, QString &tokBuff, int &wordCount, int &tlen, ushort *&tokPtr, ushort &rtok, ushort *&buf, QString &xprBuff, const QStringRef &in, const ushort *&cur);
-    void function_stripComments(const ushort *&cur, const ushort *&cptr, ushort &c);
+    bool function_stripComments(const ushort *&cur, const ushort *&cptr, ushort &c, const ushort *&inend, const ushort *&end);
 };
 
 Q_DECLARE_OPERATORS_FOR_FLAGS(QMakeParser::ParseFlags)

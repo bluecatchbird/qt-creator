@@ -416,7 +416,8 @@ void QMakeParser::function_openBlock(ushort* &ptr, int &tlen, ushort* &xprPtr,
         parseError(fL1S("Opening scope not permitted in this context."));
 }
 
-void QMakeParser::function_stripComments(const ushort* &cur,const ushort* &cptr, ushort &c) {
+bool QMakeParser::function_stripComments(const ushort* &cur,const ushort* &cptr, ushort &c,
+                                         const ushort* &inend, const ushort* &end ) {
     // Then strip comments. Yep - no escaping is possible.
     for (cptr = cur;; ++cptr) {
         if (cptr == inend) {
@@ -436,7 +437,7 @@ void QMakeParser::function_stripComments(const ushort* &cur,const ushort* &cptr,
                 if (m_markLine == m_lineNo)
                     m_markLine++;
                 // Qmake bizarreness: such lines do not affect line continuations
-                goto ignore;
+                return true;
             }
             break;
         }
@@ -445,6 +446,7 @@ void QMakeParser::function_stripComments(const ushort* &cur,const ushort* &cptr,
             break;
         }
     }
+    return false;
 }
 
 void QMakeParser::function_nofunc(ushort* &ptr, ushort* &xprPtr, ushort &quote,
@@ -650,37 +652,11 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
             if (c != ' ' && c != '\t' && c != '\r')
                 break;
         }
-#if 0
-        function_stripComments(cur, cptr, c)
-        // Then strip comments. Yep - no escaping is possible.
-        for (cptr = cur;; ++cptr) {
-            if (cptr == inend) {
-                end = cptr;
-                break;
-            }
-            c = *cptr;
-            if (c == '#') {
-                end = cptr;
-                while (++cptr < inend) {
-                    if (*cptr == '\n') {
-                        ++cptr;
-                        break;
-                    }
-                }
-                if (end == cur) { // Line with only a comment (sans whitespace)
-                    if (m_markLine == m_lineNo)
-                        m_markLine++;
-                    // Qmake bizarreness: such lines do not affect line continuations
-                    goto ignore;
-                }
-                break;
-            }
-            if (c == '\n') {
-                end = cptr++;
-                break;
-            }
+
+        if( function_stripComments(cur, cptr, c, inend, end)) {
+            goto ignore;
         }
-#endif
+
         // Then look for line continuations. Yep - no escaping here as well.
         forever {
             // We don't have to check for underrun here, as we already determined
