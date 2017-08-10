@@ -937,10 +937,9 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                                             m_invert++;
                                                             goto nextChr;
                             } else {
-                                bool gotoNextWord = false;
+                                bool gotoNextWord = true;
                                 if (c == ' ' || c == '\t') {
                                     FLUSH_LHS_LITERAL();
-                                    gotoNextWord = true;
                                 } else if (c == '(') {
                                     FLUSH_LHS_LITERAL();
                                     if (wordCount != 1) {
@@ -955,7 +954,6 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     function_funcCall(xprStack, parens, quote, term,
                                                       context, argc, wordCount);
                                     wordCount = 0;
-                                    gotoNextWord = true;
                                 } else if (c == ':') {
                                     FLUSH_LHS_LITERAL();
                                     finalizeCond(tokPtr, buf, ptr, wordCount);
@@ -966,7 +964,6 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                         m_operator = AndOperator;
                                     ptr = buf;
                                     wordCount = 0;
-                                    gotoNextWord = true;
                                 } else if (c == '|') {
                                     FLUSH_LHS_LITERAL();
                                     finalizeCond(tokPtr, buf, ptr, wordCount);
@@ -977,13 +974,11 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                         m_operator = OrOperator;
                                     ptr = buf;
                                     wordCount = 0;
-                                    gotoNextWord = true;
                                 } else if (c == '{') {
                                     function_openBlock(ptr, tlen, xprPtr, needSep, wordCount,
                                                        tokPtr, grammar, buf);
                                     ptr = buf;
                                     wordCount = 0;
-                                    gotoNextWord = true;
                                 } else if (c == '}') {
                                     FLUSH_LHS_LITERAL();
                                     finalizeCond(tokPtr, buf, ptr, wordCount);
@@ -991,7 +986,6 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     function_closeScope(tokPtr);
                                     ptr = buf;
                                     wordCount = 0;
-                                    gotoNextWord = true;
                                 } else if ((c == '+') || \
                                            (c == '-') || \
                                            (c == '*') || \
@@ -1011,7 +1005,6 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                         function_doOp(tokPtr, grammar, wordCount,
                                                       buf, ptr, tok, tlen, xprPtr, needSep, context);
                                         wordCount = 0;
-                                        gotoNextWord = true;
                                     } else {
                                         gotoNextWord = false;
                                     }
@@ -1020,7 +1013,8 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                                     function_doOp(tokPtr, grammar, wordCount,
                                                   buf, ptr, tok, tlen, xprPtr, needSep, context);
                                     wordCount = 0;
-                                    gotoNextWord = true;
+                                } else {
+                                    gotoNextWord = false;
                                 }
 
                                 if ( gotoNextWord ) {
