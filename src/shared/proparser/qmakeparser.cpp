@@ -650,6 +650,7 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
     ushort needSep = TokNewStr; // Met unquoted whitespace
     ushort quote = 0;
     ushort term = 0;
+    bool checkForFunctionName;
 
     Context context;
     ushort *ptr;
@@ -677,26 +678,10 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
     forever {
         ushort c;
 
-#if 1
         if( function_skip_leading_whitespace(indent, cur, inend, c) ) {
             goto flushLine;
         }
-#else
-        // First, skip leading whitespace
-        for (indent = 0; ; ++cur, ++indent) {
-            if (cur == inend) {
-                cur = 0;
-                goto flushLine;
-            }
-            c = *cur;
-            if (c == '\n') {
-                ++cur;
-                goto flushLine;
-            }
-            if (c != ' ' && c != '\t' && c != '\r')
-                break;
-        }
-#endif
+
         if( function_stripComments(cur, cptr, c, inend, end)) {
             goto ignore;
         }
@@ -745,19 +730,20 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
                         }
                         xprPtr = ptr;
                         rtok = tok;
+                        checkForFunctionName = true;
                         while ((c & 0xFF00) || c == '.' || c == '_' ||
                                (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') ||
                                (c >= '0' && c <= '9') || (c == '/' && term)) {
                             *ptr++ = c;
                             if (++cur == end) {
                                 c = 0;
-                                goto notfunc;
+                                checkForFunctionName = false;
                             }
                             c = *cur;
                         }
-                        if (tok == TokVariable && c == '(')
+                        if (checkForFunctionName && tok == TokVariable && c == '(')
                             tok = TokFuncName;
-                      notfunc:
+
                         function_nofunc(ptr, xprPtr, quote,
                                         needSep, tok, tokBuff,
                                         wordCount, tlen, tokPtr,
