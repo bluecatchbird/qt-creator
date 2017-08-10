@@ -715,295 +715,301 @@ void QMakeParser::read(ProFile *pro, const QStringRef &in, int line, SubGrammar 
     const ushort *cur = (const ushort *)in.unicode();
     const ushort *inend = cur + in.length();
     m_canElse = false;
-  freshLine:
-    m_state = StNew;
-    m_invert = 0;
-    m_operator = NoOperator;
-    m_markLine = m_lineNo;
-    m_inError = false;
-    int parens = 0; // Braces in value context
-    int argc = 0;
-    int wordCount = 0; // Number of words in currently accumulated expression
-    int lastIndent = 0; // Previous line's indentation, to detect accidental continuation abuse
-    bool lineMarked = true; // For in-expression markers
-    ushort needSep = TokNewStr; // Met unquoted whitespace
-    ushort quote = 0;
-    ushort term = 0;
+    bool freshline = true;
 
-    Context context;
-    ushort *ptr;
-    if (grammar == ValueGrammar) {
-        context = CtxPureValue;
-        ptr = tokPtr + 2;
-    } else {
-        context = CtxTest;
-        ptr = buf + 4;
-    }
-    ushort *xprPtr = ptr;
-    const ushort *end; // End of this line
-    const ushort *cptr; // Start of next line
-    bool lineCont;
-    int indent;
+    do {
+        freshline = false;
+        m_state = StNew;
+        m_invert = 0;
+        m_operator = NoOperator;
+        m_markLine = m_lineNo;
+        m_inError = false;
+        int parens = 0; // Braces in value context
+        int argc = 0;
+        int wordCount = 0; // Number of words in currently accumulated expression
+        int lastIndent = 0; // Previous line's indentation, to detect accidental continuation abuse
+        bool lineMarked = true; // For in-expression markers
+        ushort needSep = TokNewStr; // Met unquoted whitespace
+        ushort quote = 0;
+        ushort term = 0;
 
-    if (context == CtxPureValue) {
-        end = inend;
-        cptr = 0;
-        lineCont = false;
-        indent = 0; // just gcc being stupid
-        goto nextChr;
-    }
+        Context context;
+        ushort *ptr;
+        if (grammar == ValueGrammar) {
+            context = CtxPureValue;
+            ptr = tokPtr + 2;
+        } else {
+            context = CtxTest;
+            ptr = buf + 4;
+        }
+        ushort *xprPtr = ptr;
+        const ushort *end; // End of this line
+        const ushort *cptr; // Start of next line
+        bool lineCont;
+        int indent;
 
-    forever {
-        ushort c;
-
-        if( function_skip_leading_whitespace(indent, cur, inend, c) ) {
-            goto flushLine;
+        if (context == CtxPureValue) {
+            end = inend;
+            cptr = 0;
+            lineCont = false;
+            indent = 0; // just gcc being stupid
+            goto nextChr;
         }
 
-        if( function_stripComments(cur, cptr, c, inend, end)) {
-            goto ignore;
-        }
+        while(1) {
+            ushort c;
+
+            if( function_skip_leading_whitespace(indent, cur, inend, c) ) {
+                goto flushLine;
+            }
+
+            if( function_stripComments(cur, cptr, c, inend, end)) {
+                goto ignore;
+            }
 
 
-        function_line_continuations(end, lineCont);
+            function_line_continuations(end, lineCont);
 
-            // Finally, do the tokenization
-            ushort tok, rtok;
-            int tlen;
-          newWord:
-            do {
-                if (cur == end)
-                    goto lineEnd;
-                c = *cur++;
-            } while (c == ' ' || c == '\t');
-            forever {
-                if (c == '$') {
-                    if (*cur == '$') { // may be EOF, EOL, WS, '#' or '\\' if past end
+                // Finally, do the tokenization
+                ushort tok, rtok;
+                int tlen;
+              newWord:
+                do {
+                    if (cur == end)
+                        goto lineEnd;
+                    c = *cur++;
+                } while (c == ' ' || c == '\t');
+                while(1) {
+                    if (c == '$') {
+                        if (*cur == '$') { // may be EOF, EOL, WS, '#' or '\\' if past end
 
-                        function_stuff(ptr, xprPtr, quote,
-                                       needSep, tok, tokBuff,
-                                       wordCount, tlen, tokPtr,
-                                       rtok, buf, xprBuff,
-                                       in, cur, lineMarked, term,
-                                       c, context, end);
+                            function_stuff(ptr, xprPtr, quote,
+                                           needSep, tok, tokBuff,
+                                           wordCount, tlen, tokPtr,
+                                           rtok, buf, xprBuff,
+                                           in, cur, lineMarked, term,
+                                           c, context, end);
 
-                        if ((tok & TokMask) == TokFuncName) {
-                            cur++;
-                          funcCall:
-                            function_funcCall(xprStack, parens, quote, term,
-                                              context, argc, wordCount);
-                          nextToken:
-                            wordCount = 0;
-                          nextWord:
+                            if ((tok & TokMask) == TokFuncName) {
+                                cur++;
+                              funcCall:
+                                function_funcCall(xprStack, parens, quote, term,
+                                                  context, argc, wordCount);
+                              nextToken:
+                                wordCount = 0;
+                              nextWord:
+                                ptr += (context == CtxTest) ? 4 : 2;
+                                xprPtr = ptr;
+                                needSep = TokNewStr;
+                                goto newWord;
+                            }
+                            if (term) {
+                              checkTerm:
+                                if (c != term) {
+                                    parseError(fL1S("Missing %1 terminator [found %2]")
+                                        .arg(QChar(term))
+                                        .arg(c ? QString(c) : QString::fromLatin1("end-of-line")));
+                                    m_inError = true;
+                                    // Just parse on, as if there was a terminator ...
+                                } else {
+                                    cur++;
+                                }
+                            }
+                          joinToken:
                             ptr += (context == CtxTest) ? 4 : 2;
                             xprPtr = ptr;
-                            needSep = TokNewStr;
-                            goto newWord;
+                            needSep = 0;
+                            goto nextChr;
                         }
-                        if (term) {
-                          checkTerm:
-                            if (c != term) {
-                                parseError(fL1S("Missing %1 terminator [found %2]")
-                                    .arg(QChar(term))
-                                    .arg(c ? QString(c) : QString::fromLatin1("end-of-line")));
-                                m_inError = true;
-                                // Just parse on, as if there was a terminator ...
-                            } else {
-                                cur++;
+                    } else if (c == '\\') {
+                        static const char symbols[] = "[]{}()$\\'\"";
+                        ushort c2;
+                        if (cur != end && !((c2 = *cur) & 0xff00) && strchr(symbols, c2)) {
+                            c = c2;
+                            cur++;
+                        } else {
+                            deprecationWarning(fL1S("Unescaped backslashes are deprecated"));
+                        }
+                    } else if (quote) {
+                        if (c == quote) {
+                            quote = 0;
+                            goto nextChr;
+                        } else if (c == '!' && ptr == xprPtr && context == CtxTest) {
+                            m_invert++;
+                            goto nextChr;
+                        }
+                    } else if (c == '\'' || c == '"') {
+                        quote = c;
+                        goto nextChr;
+                    } else if (context == CtxArgs) {
+                        // Function arg context
+                        if (c == ' ' || c == '\t') {
+                            FLUSH_RHS_LITERAL();
+                            goto nextWord;
+                        } else if (c == '(') {
+                            ++parens;
+                        } else if (c == ')') {
+                            if (--parens < 0) {
+                                FLUSH_RHS_LITERAL();
+                                *ptr++ = TokFuncTerminator;
+                                int theargc = argc;
+                                {
+                                    ParseCtx &top = xprStack.top();
+                                    parens = top.parens;
+                                    quote = top.quote;
+                                    term = top.terminator;
+                                    context = top.context;
+                                    argc = top.argc;
+                                    wordCount = top.wordCount;
+                                    xprStack.resize(xprStack.size() - 1);
+                                }
+                                if (term == ':') {
+                                    finalizeCall(tokPtr, buf, ptr, theargc);
+                                    goto nextItem;
+                                } else if (term == '}') {
+                                    c = (cur == end) ? 0 : *cur;
+                                    goto checkTerm;
+                                } else {
+                                    Q_ASSERT(!term);
+                                    goto joinToken;
+                                }
                             }
+                        } else if (!parens && c == ',') {
+                            FLUSH_RHS_LITERAL();
+                            *ptr++ = TokArgSeparator;
+                            argc++;
+                            goto nextToken;
                         }
-                      joinToken:
+                    } else if (context == CtxTest) {
+                        // Test or LHS context
+                        if (c == ' ' || c == '\t') {
+                            FLUSH_LHS_LITERAL();
+                            goto nextWord;
+                        } else if (c == '(') {
+                            FLUSH_LHS_LITERAL();
+                            if (wordCount != 1) {
+                                if (wordCount)
+                                    parseError(fL1S("Extra characters after test expression."));
+                                else
+                                    parseError(fL1S("Opening parenthesis without prior test name."));
+                                ptr = buf; // Put empty function name
+                            }
+                            *ptr++ = TokTestCall;
+                            term = ':';
+                            goto funcCall;
+                        } else if (c == '!' && ptr == xprPtr) {
+                            m_invert++;
+                            goto nextChr;
+                        } else if (c == ':') {
+                            FLUSH_LHS_LITERAL();
+                            finalizeCond(tokPtr, buf, ptr, wordCount);
+                            warnOperator("in front of AND operator");
+                            if (m_state == StNew)
+                                parseError(fL1S("AND operator without prior condition."));
+                            else
+                                m_operator = AndOperator;
+                          nextItem:
+                            ptr = buf;
+                            goto nextToken;
+                        } else if (c == '|') {
+                            FLUSH_LHS_LITERAL();
+                            finalizeCond(tokPtr, buf, ptr, wordCount);
+                            warnOperator("in front of OR operator");
+                            if (m_state != StCond)
+                                parseError(fL1S("OR operator without prior condition."));
+                            else
+                                m_operator = OrOperator;
+                            goto nextItem;
+                        } else if (c == '{') {
+                            function_openBlock(ptr, tlen, xprPtr, needSep, wordCount,
+                                               tokPtr, grammar, buf);
+                            goto nextItem;
+                        } else if (c == '}') {
+                            FLUSH_LHS_LITERAL();
+                            finalizeCond(tokPtr, buf, ptr, wordCount);
+                            m_state = StNew; // De-facto newline
+                          closeScope:
+                            function_closeScope(tokPtr);
+                            goto nextItem;
+                        } else if (c == '+') {
+                            tok = TokAppend;
+                            goto do2Op;
+                        } else if (c == '-') {
+                            tok = TokRemove;
+                            goto do2Op;
+                        } else if (c == '*') {
+                            tok = TokAppendUnique;
+                            goto do2Op;
+                        } else if (c == '~') {
+                            tok = TokReplace;
+                          do2Op:
+                            if (*cur == '=') {
+                                cur++;
+                                goto doOp;
+                            }
+                        } else if (c == '=') {
+                            tok = TokAssign;
+                          doOp:
+                            function_doOp(tokPtr, grammar, wordCount,
+                                          buf, ptr, tok, tlen, xprPtr, needSep, context);
+                            goto nextToken;
+                        }
+                    } else if (context == CtxValue) {
+                        if (c == ' ' || c == '\t') {
+                            FLUSH_RHS_LITERAL();
+                            goto nextWord;
+                        } else if (c == '{') {
+                            ++parens;
+                        } else if (c == '}') {
+                            if (!parens) {
+                                FLUSH_RHS_LITERAL();
+                                FLUSH_VALUE_LIST();
+                                context = CtxTest;
+                                goto closeScope;
+                            }
+                            --parens;
+                        } else if (c == '=') {
+                            if (indent < lastIndent)
+                                languageWarning(fL1S("Possible accidental line continuation"));
+                        }
+                    }
+                    *ptr++ = c;
+                  nextChr:
+                    if (cur == end)
+                        goto lineEnd;
+                    c = *cur++;
+                }
+
+              lineEnd:
+                if (lineCont) {
+                    if (quote) {
+                        *ptr++ = ' ';
+                    } else {
+                        FLUSH_LITERAL();
+                        needSep = TokNewStr;
                         ptr += (context == CtxTest) ? 4 : 2;
                         xprPtr = ptr;
-                        needSep = 0;
-                        goto nextChr;
                     }
-                } else if (c == '\\') {
-                    static const char symbols[] = "[]{}()$\\'\"";
-                    ushort c2;
-                    if (cur != end && !((c2 = *cur) & 0xff00) && strchr(symbols, c2)) {
-                        c = c2;
-                        cur++;
-                    } else {
-                        deprecationWarning(fL1S("Unescaped backslashes are deprecated"));
-                    }
-                } else if (quote) {
-                    if (c == quote) {
-                        quote = 0;
-                        goto nextChr;
-                    } else if (c == '!' && ptr == xprPtr && context == CtxTest) {
-                        m_invert++;
-                        goto nextChr;
-                    }
-                } else if (c == '\'' || c == '"') {
-                    quote = c;
-                    goto nextChr;
-                } else if (context == CtxArgs) {
-                    // Function arg context
-                    if (c == ' ' || c == '\t') {
-                        FLUSH_RHS_LITERAL();
-                        goto nextWord;
-                    } else if (c == '(') {
-                        ++parens;
-                    } else if (c == ')') {
-                        if (--parens < 0) {
-                            FLUSH_RHS_LITERAL();
-                            *ptr++ = TokFuncTerminator;
-                            int theargc = argc;
-                            {
-                                ParseCtx &top = xprStack.top();
-                                parens = top.parens;
-                                quote = top.quote;
-                                term = top.terminator;
-                                context = top.context;
-                                argc = top.argc;
-                                wordCount = top.wordCount;
-                                xprStack.resize(xprStack.size() - 1);
-                            }
-                            if (term == ':') {
-                                finalizeCall(tokPtr, buf, ptr, theargc);
-                                goto nextItem;
-                            } else if (term == '}') {
-                                c = (cur == end) ? 0 : *cur;
-                                goto checkTerm;
-                            } else {
-                                Q_ASSERT(!term);
-                                goto joinToken;
-                            }
-                        }
-                    } else if (!parens && c == ',') {
-                        FLUSH_RHS_LITERAL();
-                        *ptr++ = TokArgSeparator;
-                        argc++;
-                        goto nextToken;
-                    }
-                } else if (context == CtxTest) {
-                    // Test or LHS context
-                    if (c == ' ' || c == '\t') {
-                        FLUSH_LHS_LITERAL();
-                        goto nextWord;
-                    } else if (c == '(') {
-                        FLUSH_LHS_LITERAL();
-                        if (wordCount != 1) {
-                            if (wordCount)
-                                parseError(fL1S("Extra characters after test expression."));
-                            else
-                                parseError(fL1S("Opening parenthesis without prior test name."));
-                            ptr = buf; // Put empty function name
-                        }
-                        *ptr++ = TokTestCall;
-                        term = ':';
-                        goto funcCall;
-                    } else if (c == '!' && ptr == xprPtr) {
-                        m_invert++;
-                        goto nextChr;
-                    } else if (c == ':') {
-                        FLUSH_LHS_LITERAL();
-                        finalizeCond(tokPtr, buf, ptr, wordCount);
-                        warnOperator("in front of AND operator");
-                        if (m_state == StNew)
-                            parseError(fL1S("AND operator without prior condition."));
-                        else
-                            m_operator = AndOperator;
-                      nextItem:
-                        ptr = buf;
-                        goto nextToken;
-                    } else if (c == '|') {
-                        FLUSH_LHS_LITERAL();
-                        finalizeCond(tokPtr, buf, ptr, wordCount);
-                        warnOperator("in front of OR operator");
-                        if (m_state != StCond)
-                            parseError(fL1S("OR operator without prior condition."));
-                        else
-                            m_operator = OrOperator;
-                        goto nextItem;
-                    } else if (c == '{') {
-                        function_openBlock(ptr, tlen, xprPtr, needSep, wordCount,
-                                           tokPtr, grammar, buf);
-                        goto nextItem;
-                    } else if (c == '}') {
-                        FLUSH_LHS_LITERAL();
-                        finalizeCond(tokPtr, buf, ptr, wordCount);
-                        m_state = StNew; // De-facto newline
-                      closeScope:
-                        function_closeScope(tokPtr);
-                        goto nextItem;
-                    } else if (c == '+') {
-                        tok = TokAppend;
-                        goto do2Op;
-                    } else if (c == '-') {
-                        tok = TokRemove;
-                        goto do2Op;
-                    } else if (c == '*') {
-                        tok = TokAppendUnique;
-                        goto do2Op;
-                    } else if (c == '~') {
-                        tok = TokReplace;
-                      do2Op:
-                        if (*cur == '=') {
-                            cur++;
-                            goto doOp;
-                        }
-                    } else if (c == '=') {
-                        tok = TokAssign;
-                      doOp:
-                        function_doOp(tokPtr, grammar, wordCount,
-                                      buf, ptr, tok, tlen, xprPtr, needSep, context);
-                        goto nextToken;
-                    }
-                } else if (context == CtxValue) {
-                    if (c == ' ' || c == '\t') {
-                        FLUSH_RHS_LITERAL();
-                        goto nextWord;
-                    } else if (c == '{') {
-                        ++parens;
-                    } else if (c == '}') {
-                        if (!parens) {
-                            FLUSH_RHS_LITERAL();
-                            FLUSH_VALUE_LIST();
-                            context = CtxTest;
-                            goto closeScope;
-                        }
-                        --parens;
-                    } else if (c == '=') {
-                        if (indent < lastIndent)
-                            languageWarning(fL1S("Possible accidental line continuation"));
-                    }
-                }
-                *ptr++ = c;
-              nextChr:
-                if (cur == end)
-                    goto lineEnd;
-                c = *cur++;
-            }
+                    lastIndent = indent;
+                    lineMarked = false;
 
-          lineEnd:
-            if (lineCont) {
-                if (quote) {
-                    *ptr++ = ' ';
+                    ignore:
+                      cur = cptr;
+                      ++m_lineNo;
+
                 } else {
-                    FLUSH_LITERAL();
-                    needSep = TokNewStr;
-                    ptr += (context == CtxTest) ? 4 : 2;
-                    xprPtr = ptr;
-                }
-            } else {
-                cur = cptr;
-              flushLine:
-                function_flushLine(quote, xprStack, context, parens, tokPtr, ptr, buf,
-                                   wordCount, xprPtr, tlen, needSep);
-                if (!cur)
+                    cur = cptr;
+                  flushLine:
+                    function_flushLine(quote, xprStack, context, parens, tokPtr, ptr, buf,
+                                       wordCount, xprPtr, tlen, needSep);
+                    if (!cur)
+                        break;
+                    ++m_lineNo;
+                    freshline = true;
                     break;
-                ++m_lineNo;
-                goto freshLine;
-            }
-
-        lastIndent = indent;
-        lineMarked = false;
-      ignore:
-        cur = cptr;
-        ++m_lineNo;
-    }
+                }
+        }
+    } while( freshline );
 
     flushScopes(tokPtr);
     if (m_blockstack.size() > 1 || m_blockstack.top().braceLevel)
